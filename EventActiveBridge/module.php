@@ -241,12 +241,12 @@ class EventActiveBridge extends IPSModuleStrict
             return;
         }
 
-        $result = EIB_Switch($statusInstanceID, $active);
+        $result = KNX_WriteDPT1($statusInstanceID, $active);
 
         $this->SendDebug(
             'KNXStatus',
             sprintf(
-                '%s: EIB_Switch on InstanceID %d with Status=%s returned %s.',
+                '%s: KNX_WriteDPT1 on InstanceID %d with Status=%s returned %s.',
                 $context,
                 $statusInstanceID,
                 $active ? 'true' : 'false',
