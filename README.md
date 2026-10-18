@@ -1,46 +1,70 @@
 # IPSymcon-EventActiveBridge
 
-Ein kleines PHP-Modul für **IP-Symcon 9.0**, das den Aktivierungszustand eines Symcon-Ereignisses ereignisgesteuert überwacht und als Boolean-Variable bereitstellt.
+Ein PHP-Modul für **IP-Symcon 9.0**, das den Aktivierungszustand eines Symcon-Ereignisses ereignisgesteuert überwacht, optional über eine Boolean-Steuervariable schaltet und den bestätigten Istzustand über eine KNX-DPT-1-Instanz zurückmelden kann.
 
-Das Modul wurde ursprünglich für den Anwendungsfall entwickelt, den Ein-/Aus-Zustand eines Wochenplan-Ereignisses zuverlässig für weitere Automationen verfügbar zu machen. Es ist jedoch nicht auf Wochenpläne beschränkt und kann grundsätzlich für Symcon-Ereignisse verwendet werden, deren Aktivierungszustand überwacht werden soll.
+Das Modul wurde ursprünglich für Wochenplan-Ereignisse entwickelt. Es eignet sich grundsätzlich aber für Symcon-Ereignisse, deren `EventActive`-Zustand überwacht und optional von außen gesteuert werden soll.
 
 ## Was macht das Modul?
 
-Für jede Instanz von `EventActiveBridge` wird genau ein Symcon-Ereignis ausgewählt.
+Eine Instanz von `EventActiveBridge` verbindet genau ein Symcon-Ereignis mit optionalen Ein- und Ausgängen.
 
-Das Modul:
+Das Modul kann:
 
-- liest beim Start bzw. nach einer Konfigurationsänderung den aktuellen `EventActive`-Zustand des gewählten Ereignisses,
-- legt die Boolean-Variable **„Wochenplan aktiv“** an,
-- hält diese Variable synchron zum tatsächlichen Aktivierungszustand des Ereignisses,
-- reagiert ereignisgesteuert auf Änderungen über die Symcon-Nachricht `EM_CHANGEACTIVE` (`10804`),
-- benötigt daher **keine zyklische Abfrage**.
+- den tatsächlichen `EventActive`-Zustand eines Symcon-Ereignisses überwachen,
+- Änderungen ereignisgesteuert über `EM_CHANGEACTIVE` erkennen,
+- den Zustand als Boolean-Variable **„Wochenplan aktiv“** bereitstellen,
+- eine externe Boolean-Steuervariable überwachen,
+- daraus das Symcon-Ereignis mit `IPS_SetEventActive()` aktivieren oder deaktivieren,
+- den bestätigten Istzustand über eine KNX-DPT-1-Instanz mit `KNX_WriteDPT1()` senden,
+- nach Konfigurationsänderungen bzw. Neustart eine Initialsynchronisierung durchführen,
+- unnötige Rückkopplungen vermeiden,
+- ohne zyklisches Polling arbeiten.
 
-Die Statusvariable kann anschließend z. B. für KNX-Rückmeldungen, Visualisierungen, Skripte oder andere Automationen verwendet werden.
+Wichtig: Die KNX-Statusrückmeldung erzeugt **keine zusätzliche Statusvariable** unterhalb des Moduls. Der tatsächliche Zustand liegt bereits in **„Wochenplan aktiv“** vor und wird direkt über die konfigurierte KNX-Instanz gesendet.
 
 ## Funktionsprinzip
 
+### Steuerung von außen nach IP-Symcon
+
 ```text
-Symcon-Ereignis
-      │
-      │ EventActive geändert
-      ▼
-EM_CHANGEACTIVE (10804)
-      │
-      ▼
+externe Boolean-Steuervariable
+        │
+        │ VM_UPDATE
+        ▼
 EventActiveBridge
-      │
-      ▼
-Boolean-Variable "Wochenplan aktiv"
+        │
+        │ IPS_SetEventActive()
+        ▼
+Symcon-Ereignis
 ```
 
-Wird das überwachte Ereignis beispielsweise direkt in der IP-Symcon-Visualisierung aktiviert oder deaktiviert, erkennt das Modul die Änderung und aktualisiert die Boolean-Variable unmittelbar.
+### Rückmeldung des tatsächlichen Zustands
+
+```text
+Symcon-Ereignis
+        │
+        │ EM_CHANGEACTIVE
+        ▼
+EventActiveBridge
+        ├──────────────► Boolean-Variable "Wochenplan aktiv"
+        │
+        └──────────────► KNX_WriteDPT1()
+                         │
+                         ▼
+                    KNX-Statusadresse
+```
+
+Für die Rückmeldung wird **nicht einfach der zuletzt empfangene Schaltbefehl gespiegelt**. Das Modul liest den tatsächlichen `EventActive`-Zustand des Ereignisses und verwendet diesen als führende Information.
+
+Dadurch werden auch Änderungen erkannt, die direkt über die native IP-Symcon-Visualisierung ausgelöst werden.
 
 ## Voraussetzungen
 
 - IP-Symcon **9.0 oder neuer**
 - Zugriff auf die Modulverwaltung von IP-Symcon
-- ein vorhandenes Symcon-Ereignis, das überwacht werden soll
+- ein vorhandenes Symcon-Ereignis
+- optional eine Boolean-Steuervariable
+- optional eine KNX-DPT-1-Instanz für die Statusrückmeldung
 
 Entwickelt und praktisch getestet wurde das Modul mit **IP-Symcon 9.0 auf einer SymBox**.
 
@@ -56,94 +80,226 @@ Entwickelt und praktisch getestet wurde das Modul mit **IP-Symcon 9.0 auf einer 
 
 4. Nach erfolgreichem Laden steht das Modul **EventActiveBridge** als neue Instanz zur Verfügung.
 
-## Einrichtung
+## Konfiguration
 
-1. Eine neue Instanz vom Typ **EventActiveBridge** anlegen.
-2. In der Instanzkonfiguration unter **„Zu überwachendes Ereignis“** das gewünschte Symcon-Ereignis auswählen.
-3. Konfiguration übernehmen.
+Die Instanz stellt drei Konfigurationsfelder bereit.
 
-Unterhalb der Instanz wird automatisch die Boolean-Variable **„Wochenplan aktiv“** angelegt.
+### Zu überwachendes Ereignis
 
-Der Name der Variable stammt aus dem ursprünglichen Wochenplan-Anwendungsfall. Technisch bildet sie den allgemeinen `EventActive`-Status des ausgewählten Symcon-Ereignisses ab:
+Hier wird das Symcon-Ereignis ausgewählt, dessen `EventActive`-Zustand überwacht und gegebenenfalls gesteuert werden soll.
 
-- `false` / Aus = Ereignis deaktiviert
-- `true` / An = Ereignis aktiviert
+### Steuervariable (Boolean)
 
-## Verhalten nach Neustart
+Optional.
 
-Beim Anwenden der Konfiguration sowie nach einem Neustart von IP-Symcon wird der aktuelle Zustand des gewählten Ereignisses neu eingelesen.
+Wird hier eine Boolean-Variable gewählt, reagiert das Modul auf deren Aktualisierung:
 
-Dadurch wird die Statusvariable nicht nur bei zukünftigen Änderungen aktualisiert, sondern erhält auch beim Start den tatsächlichen aktuellen Zustand.
+- `false` → Ereignis deaktivieren
+- `true` → Ereignis aktivieren
 
-## Mehrere Ereignisse überwachen
+Vor dem Schreiben wird geprüft, ob der gewünschte Zustand bereits dem tatsächlichen `EventActive`-Zustand entspricht. Ist das der Fall, erfolgt kein erneuter Schreibvorgang.
 
-Eine Modulinstanz überwacht derzeit **genau ein Ereignis**.
+### KNX-Statusinstanz
 
-Sollen mehrere Ereignisse überwacht werden, wird für jedes Ereignis eine eigene `EventActiveBridge`-Instanz angelegt.
+Optional.
+
+Hier kann eine KNX-DPT-1-Instanz ausgewählt werden. Bei jeder tatsächlichen Änderung des überwachten Ereignisses sendet das Modul dessen aktuellen Zustand mit:
+
+```php
+KNX_WriteDPT1($instanceID, $active);
+```
+
+Die konkrete Gruppenadresse wird ausschließlich durch die Konfiguration der ausgewählten KNX-Instanz bestimmt.
+
+## Warum beim Eingang eine Variable und beim Ausgang eine Instanz?
+
+Für eingehende Änderungen überwacht das Modul eine **Boolean-Variable**, weil Änderungen dort per `VM_UPDATE` erkannt werden können.
+
+Für ausgehende KNX-Telegramme wird dagegen die **KNX-Instanz** benötigt, weil `KNX_WriteDPT1()` auf einer KNX-DPT-1-Instanz arbeitet.
+
+Typischer Aufbau:
+
+```text
+KNX-Schaltadresse
+      │
+      ▼
+KNX-DPT-1-Instanz
+      │
+      ▼
+untergeordnete Boolean-Value-Variable
+      │
+      ▼
+EventActiveBridge
+      │
+      ▼
+Symcon-Ereignis
+```
+
+Rückweg:
+
+```text
+Symcon-Ereignis
+      │
+      ▼
+EventActiveBridge
+      │
+      ▼
+KNX_WriteDPT1(KNX-Instanz, Zustand)
+      │
+      ▼
+KNX-Statusadresse
+```
+
+## Empfohlenes KNX-Schema
+
+Für den ursprünglichen Anwendungsfall übernimmt IP-Symcon gegenüber KNX funktional die Rolle eines Aktors.
+
+Dafür werden typischerweise zwei Gruppenadressen verwendet:
+
+- **Schaltadresse:** KNX → IP-Symcon
+- **Statusadresse:** IP-Symcon → KNX
+
+Wenn die KNX-DPT-1-Instanz in IP-Symcon so konfiguriert ist, dass die **Statusadresse die Hauptadresse** der Instanz ist und die **Schaltadresse als zusätzliche Rückmelde-/Empfangsadresse** eingetragen ist, ergibt sich:
+
+- Telegramme auf der Schaltadresse aktualisieren die untergeordnete `Value`-Variable.
+- `EventActiveBridge` übernimmt diesen Wert als Sollzustand des Symcon-Ereignisses.
+- Änderungen des tatsächlichen `EventActive`-Zustands werden über die Statusadresse zurückgesendet.
+
+Dieses Schema erlaubt eine saubere Aktor-ähnliche KNX-Funktion mit getrenntem Schalt- und Statusobjekt.
+
+## Native IP-Symcon-Visualisierung
+
+Der native Ein-/Aus-Schalter eines Wochenplans kann unverändert weiterverwendet werden.
+
+Wird der Wochenplan dort direkt aktiviert oder deaktiviert:
+
+1. IP-Symcon ändert den tatsächlichen `EventActive`-Zustand.
+2. `EventActiveBridge` erkennt die Änderung über `EM_CHANGEACTIVE`.
+3. Die interne Boolean-Statusvariable wird aktualisiert.
+4. Falls konfiguriert, wird der bestätigte Zustand auf KNX gesendet.
+
+Damit bleiben Bedienung in IP-Symcon und externe KNX-Statusanzeigen synchron.
+
+## Verhalten nach Neustart und Konfigurationsänderungen
+
+Beim Anwenden der Konfiguration bzw. nach einem Neustart:
+
+1. wird der aktuelle `EventActive`-Zustand über `IPS_GetEvent()` gelesen,
+2. die Variable **„Wochenplan aktiv“** entsprechend gesetzt,
+3. die Nachrichtenüberwachung neu registriert,
+4. bei konfigurierter KNX-Statusinstanz der aktuelle Zustand einmal auf KNX gesendet.
+
+Damit kann eine externe Anzeige nach einem Neustart wieder auf den tatsächlichen Zustand synchronisiert werden.
+
+## Rückkopplungsschutz
+
+Eine eigene KNX-Statussendung kann abhängig von der KNX-Konfiguration ebenfalls die lokale Value-Variable aktualisieren.
+
+Das Modul vergleicht deshalb bei einem eingehenden Steuerwert zunächst den gewünschten Zustand mit dem aktuellen `EventActive`-Zustand.
+
+Sind beide bereits identisch, wird das Ereignis nicht erneut gesetzt.
+
+Dadurch werden unnötige Schleifen und doppelte Schreibvorgänge vermieden.
+
+## Mehrere Ereignisse
+
+Eine Modulinstanz verarbeitet genau **ein** Symcon-Ereignis.
+
+Für mehrere Wochenpläne oder andere Ereignisse wird jeweils eine eigene `EventActiveBridge`-Instanz angelegt.
+
+Der aktuelle Stand wurde mit mehreren unabhängigen Modulinstanzen praktisch getestet.
 
 ## Typische Anwendungsfälle
 
-- Aktivierungsstatus eines Wochenplans an KNX zurückmelden
-- Status eines Symcon-Ereignisses in eigener Logik weiterverarbeiten
+- Wochenplan über KNX aktivieren/deaktivieren
+- tatsächlichen Wochenplanstatus an KNX zurückmelden
+- native IP-Symcon-Wochenplan-Kachel und KNX synchron halten
+- Aktivierungszustand eines Ereignisses als Boolean-Variable verfügbar machen
+- Ereignissteuerung über eine andere Boolean-Variable
 - ereignisgesteuerte Synchronisierung mit externen Systemen
-- Statusanzeige außerhalb der nativen Ereignis-/Wochenplan-Kachel
 - Vermeidung zyklischer Polling-Skripte
 
 ## Debugging
 
 Die Instanz schreibt Informationen in das Symcon-Debug-Protokoll.
 
-Bei einer Zustandsänderung erscheinen beispielsweise Meldungen wie:
+Beispiele für Ereignisänderungen:
 
 ```text
 EventID 12345 changed: EventActive=false
 ```
 
-bzw.
-
 ```text
 EventID 12345 changed: EventActive=true
 ```
 
-Zusätzlich werden die von Symcon gelieferten Message-Daten im Debug ausgegeben.
+Bei eingehenden Steuerwerten wird protokolliert, welcher Zustand für das konfigurierte Ereignis angefordert wurde.
 
-## Aktueller Funktionsumfang
-
-Der derzeitige Stand des Moduls dient ausschließlich der **Überwachung und Spiegelung** des Aktivierungszustands.
-
-Das Modul:
-
-- überwacht `EventActive`,
-- stellt den Zustand als Boolean-Variable bereit,
-- synchronisiert den Zustand beim Start,
-- arbeitet ereignisgesteuert.
-
-Das Modul schaltet das überwachte Ereignis derzeit **nicht selbst**. Eine bidirektionale Steuerung bzw. zusätzliche Schnittstellen können in späteren Versionen ergänzt werden.
-
-## Datenschutz und Sicherheit
-
-Das Repository enthält nur generischen Modulcode.
-
-Konkrete Symcon-Objekt-IDs, KNX-Gruppenadressen, Netzwerkadressen oder andere installationsspezifische Daten werden **nicht im Repository gespeichert**. Die ID des zu überwachenden Ereignisses wird ausschließlich in der jeweiligen lokalen Modulinstanz von IP-Symcon konfiguriert.
+Für KNX-Statussendungen wird protokolliert, welche KNX-Instanz mit welchem Boolean-Wert über `KNX_WriteDPT1()` beschrieben wurde.
 
 ## Technischer Hintergrund
 
-IP-Symcon stellt für Änderungen an der Aktivierung eines Ereignisses die interne Nachricht `EM_CHANGEACTIVE` bereit. Das Modul registriert sich für diese Nachricht am ausgewählten Ereignis und verarbeitet sie über den `MessageSink()` des PHP-Moduls.
+Für Änderungen der Ereignisaktivierung nutzt das Modul:
 
-Anschließend wird der tatsächliche Zustand noch einmal über `IPS_GetEvent()` gelesen. Damit basiert die ausgegebene Statusvariable auf dem tatsächlichen `EventActive`-Zustand und nicht lediglich auf dem zuletzt empfangenen Änderungswert.
+```text
+EM_CHANGEACTIVE = 10804
+```
+
+Für Änderungen der Steuervariable wird auf `VM_UPDATE` reagiert.
+
+Nach einer Ereignisänderung wird der tatsächliche Zustand zusätzlich mit `IPS_GetEvent()` gelesen. Die Statusrückmeldung basiert dadurch auf dem realen `EventActive`-Zustand und nicht lediglich auf einem zuvor empfangenen Sollwert.
+
+Die eigentliche Aktivierung bzw. Deaktivierung erfolgt mit:
+
+```php
+IPS_SetEventActive($eventID, $active);
+```
+
+Die KNX-Rückmeldung erfolgt mit:
+
+```php
+KNX_WriteDPT1($instanceID, $active);
+```
+
+## Datenschutz und Sicherheit
+
+Das Repository enthält ausschließlich generischen Modulcode.
+
+Konkrete:
+
+- Symcon-Objekt-IDs
+- KNX-Gruppenadressen
+- Netzwerkadressen
+- Zugangsdaten
+- projektspezifische Bezeichnungen
+
+werden nicht im Repository gespeichert.
+
+Alle installationsspezifischen Zuordnungen werden ausschließlich lokal in der jeweiligen IP-Symcon-Instanz konfiguriert.
+
+## Getesteter Stand
+
+Der aktuelle Stand wurde mit IP-Symcon 9.0 praktisch getestet für:
+
+- direkte Änderung des Ereignisses über die native Kachelvisualisierung,
+- Erkennung von `EventActive=false`,
+- Erkennung von `EventActive=true`,
+- Aktualisierung der internen Boolean-Statusvariable,
+- Steuerung des Ereignisses über eine externe Boolean-Variable,
+- KNX-Schalttelegramm → Symcon-Ereignis,
+- Symcon-Ereignis → KNX-Statusrückmeldung,
+- KNX-DPT-1-Rückmeldung für `false` und `true`,
+- bidirektionale Synchronisierung mit einem KNX-Bedienelement,
+- mehrere unabhängige Modulinstanzen,
+- Initialsynchronisierung,
+- ereignisgesteuerten Betrieb ohne zyklische Abfrage.
 
 ## Lizenz
 
-Aktuell ist noch keine Lizenzdatei hinterlegt. Vor einer Weiterverwendung oder Veröffentlichung in größerem Umfang sollte eine passende Open-Source-Lizenz ergänzt werden.
+Aktuell ist noch keine Lizenzdatei hinterlegt. Vor einer breiteren Weiterverwendung oder Veröffentlichung sollte eine passende Open-Source-Lizenz ergänzt werden.
 
 ## Status
 
-Frühe Version / Funktionsprototyp.
+Frühe, funktionsfähige Version.
 
-Der Kernmechanismus wurde erfolgreich mit IP-Symcon 9.0 getestet:
-
-- Erkennung von Aktivieren → `EventActive=true`
-- Erkennung von Deaktivieren → `EventActive=false`
-- Aktualisierung der Boolean-Statusvariable
-- initiale Synchronisierung nach Modulaktualisierung / Konfigurationsanwendung
-- keine zyklische Statusabfrage erforderlich
+Der bidirektionale Kernmechanismus ist praktisch getestet. Weitere Verallgemeinerungen und Komfortfunktionen können in späteren Versionen ergänzt werden.
