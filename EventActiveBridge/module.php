@@ -12,6 +12,7 @@ class EventActiveBridge extends IPSModuleStrict
         parent::Create();
 
         $this->RegisterPropertyInteger('EventID', 0);
+        $this->RegisterVariableBoolean('EventActive', 'Wochenplan aktiv', [], 10);
     }
 
     public function ApplyChanges(): void
@@ -42,10 +43,19 @@ class EventActiveBridge extends IPSModuleStrict
             return;
         }
 
+        // Initial synchronization after configuration changes or a Symcon restart.
+        $event = IPS_GetEvent($eventID);
+        $active = (bool) $event['EventActive'];
+        $this->SetValue('EventActive', $active);
+
         $this->RegisterMessage($eventID, self::EVENT_CHANGE_ACTIVE);
         $this->SendDebug(
             'Configuration',
-            sprintf('Listening for EM_CHANGEACTIVE on EventID %d.', $eventID),
+            sprintf(
+                'Listening for EM_CHANGEACTIVE on EventID %d. Initial EventActive=%s',
+                $eventID,
+                $active ? 'true' : 'false'
+            ),
             self::DEBUG_TEXT
         );
     }
@@ -67,6 +77,8 @@ class EventActiveBridge extends IPSModuleStrict
 
         $event = IPS_GetEvent($SenderID);
         $active = (bool) $event['EventActive'];
+
+        $this->SetValue('EventActive', $active);
 
         $this->SendDebug(
             'EventActive',
