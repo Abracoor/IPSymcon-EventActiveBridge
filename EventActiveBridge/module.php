@@ -7,13 +7,14 @@ class EventActiveBridge extends IPSModuleStrict
     private const DEBUG_TEXT = 0;
     private const EVENT_CHANGE_ACTIVE = 10804;
     private const VARIABLE_UPDATE = 10603;
+    private const VARIABLE_TYPE_BOOLEAN = 0;
 
     public function Create(): void
     {
         parent::Create();
 
         $this->RegisterPropertyInteger('EventID', 0);
-        $this->RegisterPropertyInteger('CommandVariableID', 0);
+        $this->RegisterPropertyInteger('SourceVariableID', 0);
         $this->RegisterVariableBoolean('EventActive', 'Wochenplan aktiv', [], 10);
     }
 
@@ -30,7 +31,7 @@ class EventActiveBridge extends IPSModuleStrict
         }
 
         $eventID = $this->ReadPropertyInteger('EventID');
-        $commandVariableID = $this->ReadPropertyInteger('CommandVariableID');
+        $sourceVariableID = $this->ReadPropertyInteger('SourceVariableID');
 
         if ($eventID <= 0) {
             $this->SendDebug('Configuration', 'No EventID configured.', self::DEBUG_TEXT);
@@ -53,38 +54,39 @@ class EventActiveBridge extends IPSModuleStrict
 
         $this->RegisterMessage($eventID, self::EVENT_CHANGE_ACTIVE);
 
-        if ($commandVariableID > 0) {
-            if (!IPS_VariableExists($commandVariableID)) {
+        if ($sourceVariableID > 0) {
+            if (!IPS_VariableExists($sourceVariableID)) {
                 $this->SendDebug(
                     'Configuration',
-                    sprintf('Configured CommandVariableID %d does not exist.', $commandVariableID),
+                    sprintf('Configured SourceVariableID %d does not exist.', $sourceVariableID),
                     self::DEBUG_TEXT
                 );
-                return;
-            }
+            } else {
+                $variable = IPS_GetVariable($sourceVariableID);
 
-            $variable = IPS_GetVariable($commandVariableID);
-            if ($variable['VariableType'] !== VARIABLETYPE_BOOLEAN) {
-                $this->SendDebug(
-                    'Configuration',
-                    sprintf('CommandVariableID %d is not Boolean.', $commandVariableID),
-                    self::DEBUG_TEXT
-                );
-                return;
+                if ((int) $variable['VariableType'] !== self::VARIABLE_TYPE_BOOLEAN) {
+                    $this->SendDebug(
+                        'Configuration',
+                        sprintf('SourceVariableID %d is not a Boolean variable.', $sourceVariableID),
+                        self::DEBUG_TEXT
+                    );
+                } else {
+                    $this->RegisterMessage($sourceVariableID, self::VARIABLE_UPDATE);
+                    $this->SendDebug(
+                        'Configuration',
+                        sprintf('Listening for VM_UPDATE on SourceVariableID %d.', $sourceVariableID),
+                        self::DEBUG_TEXT
+                    );
+                }
             }
-
-            $this->RegisterMessage($commandVariableID, self::VARIABLE_UPDATE);
         }
 
         $this->SendDebug(
             'Configuration',
             sprintf(
-                'Listening for EventID %d (EventActive=%s)%s',
+                'Listening for EM_CHANGEACTIVE on EventID %d. Initial EventActive=%s',
                 $eventID,
-                $active ? 'true' : 'false',
-                $commandVariableID > 0
-                    ? sprintf(' and Boolean CommandVariableID %d.', $commandVariableID)
-                    : '.'
+                $active ? 'true' : 'false'
             ),
             self::DEBUG_TEXT
         );
@@ -92,60 +94,101 @@ class EventActiveBridge extends IPSModuleStrict
 
     public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
     {
-        $eventID = $this->ReadPropertyInteger('EventID');
-        $commandVariableID = $this->ReadPropertyInteger('CommandVariableID');
+        if ($Message === self::EVENT_CHANGE_ACTIVE) {
+            $this->HandleEventActiveChange($SenderID, $Data);
+            return;
+        }
 
-        if ($Message === self::EVENT_CHANGE_ACTIVE && $SenderID === $eventID) {
-            if (!IPS_EventExists($SenderID)) {
-                $this->SendDebug(
-                    'EventActive',
-                    sprintf('Sender EventID %d no longer exists.', $SenderID),
-                    self::DEBUG_TEXT
-                );
-                return;
-            }
+        if ($Message === self::VARIABLE_UPDATE) {
+            $this->HandleSourceVariableUpdate($SenderID, $Data);
+        }
+    }
 
-            $event = IPS_GetEvent($SenderID);
-            $active = (bool) $event['EventActive'];
+    private function HandleEventActiveChange(int $senderID, array $data): void
+    {
+        $configuredEventID = $this->ReadPropertyInteger('EventID');
 
-            $this->SetValue('EventActive', $active);
+        if ($senderID !== $configuredEventID) {
+            return;
+        }
 
+        if (!IPS_EventExists($senderID)) {
             $this->SendDebug(
                 'EventActive',
-                sprintf(
-                    'EventID %d changed: EventActive=%s',
-                    $SenderID,
-                    $active ? 'true' : 'false'
-                ),
+                sprintf('Sender EventID %d no longer exists.', $senderID),
                 self::DEBUG_TEXT
             );
             return;
         }
 
-        if ($Message === self::VARIABLE_UPDATE && $SenderID === $commandVariableID) {
-            if (!IPS_VariableExists($SenderID) || !IPS_EventExists($eventID)) {
-                return;
-            }
+        $event = IPS_GetEvent($senderID);
+        $active = (bool) $event['EventActive'];
 
-            $requestedState = GetValueBoolean($SenderID);
-            $event = IPS_GetEvent($eventID);
-            $currentState = (bool) $event['EventActive'];
+        $this->SetValue('EventActive', $active);
 
+        $this->SendDebug(
+            'EventActive',
+            sprintf(
+                'EventID %d changed: EventActive=%s',
+                $senderID,
+                $active ? 'true' : 'false'
+            ),
+            self::DEBUG_TEXT
+        );
+
+        $this->SendDebug(
+            'MessageData',
+            json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '[]',
+            self::DEBUG_TEXT
+        );
+    }
+
+    private function HandleSourceVariableUpdate(int $senderID, array $data): void
+    {
+        $sourceVariableID = $this->ReadPropertyInteger('SourceVariableID');
+
+        if ($senderID !== $sourceVariableID) {
+            return;
+        }
+
+        if (!IPS_VariableExists($senderID)) {
             $this->SendDebug(
-                'Command',
-                sprintf(
-                    'CommandVariableID %d requested EventActive=%s (current=%s)',
-                    $SenderID,
-                    $requestedState ? 'true' : 'false',
-                    $currentState ? 'true' : 'false'
-                ),
+                'SourceVariable',
+                sprintf('Sender VariableID %d no longer exists.', $senderID),
                 self::DEBUG_TEXT
             );
-
-            // Avoid unnecessary writes and possible feedback loops.
-            if ($requestedState !== $currentState) {
-                IPS_SetEventActive($eventID, $requestedState);
-            }
+            return;
         }
+
+        $eventID = $this->ReadPropertyInteger('EventID');
+
+        if (!IPS_EventExists($eventID)) {
+            $this->SendDebug(
+                'SourceVariable',
+                sprintf('Configured EventID %d does not exist.', $eventID),
+                self::DEBUG_TEXT
+            );
+            return;
+        }
+
+        $requestedActive = GetValueBoolean($senderID);
+        IPS_SetEventActive($eventID, $requestedActive);
+
+        $this->SendDebug(
+            'SourceVariable',
+            sprintf(
+                'VariableID %d updated: requested EventID %d EventActive=%s',
+                $senderID,
+                $eventID,
+                $requestedActive ? 'true' : 'false'
+            ),
+            self::DEBUG_TEXT
+        );
+
+        $this->SendDebug(
+            'SourceMessageData',
+            json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '[]',
+            self::DEBUG_TEXT
+        );
     }
 }
