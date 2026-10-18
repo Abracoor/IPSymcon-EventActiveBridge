@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 class EventActiveBridge extends IPSModuleStrict
 {
+    private const DEBUG_TEXT = 0;
+    private const EVENT_CHANGE_ACTIVE = 10804;
+
     public function Create(): void
     {
         parent::Create();
@@ -26,7 +29,7 @@ class EventActiveBridge extends IPSModuleStrict
         $eventID = $this->ReadPropertyInteger('EventID');
 
         if ($eventID <= 0) {
-            $this->SendDebug('Configuration', 'No EventID configured.', DEBUG_FORMAT_TEXT);
+            $this->SendDebug('Configuration', 'No EventID configured.', self::DEBUG_TEXT);
             return;
         }
 
@@ -34,22 +37,22 @@ class EventActiveBridge extends IPSModuleStrict
             $this->SendDebug(
                 'Configuration',
                 sprintf('Configured EventID %d does not exist.', $eventID),
-                DEBUG_FORMAT_TEXT
+                self::DEBUG_TEXT
             );
             return;
         }
 
-        $this->RegisterMessage($eventID, EM_CHANGEACTIVE);
+        $this->RegisterMessage($eventID, self::EVENT_CHANGE_ACTIVE);
         $this->SendDebug(
             'Configuration',
             sprintf('Listening for EM_CHANGEACTIVE on EventID %d.', $eventID),
-            DEBUG_FORMAT_TEXT
+            self::DEBUG_TEXT
         );
     }
 
     public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
     {
-        if ($Message !== EM_CHANGEACTIVE) {
+        if ($Message !== self::EVENT_CHANGE_ACTIVE) {
             return;
         }
 
@@ -57,7 +60,7 @@ class EventActiveBridge extends IPSModuleStrict
             $this->SendDebug(
                 'EventActive',
                 sprintf('Sender EventID %d no longer exists.', $SenderID),
-                DEBUG_FORMAT_TEXT
+                self::DEBUG_TEXT
             );
             return;
         }
@@ -72,13 +75,13 @@ class EventActiveBridge extends IPSModuleStrict
                 $SenderID,
                 $active ? 'true' : 'false'
             ),
-            DEBUG_FORMAT_TEXT
+            self::DEBUG_TEXT
         );
 
         $this->SendDebug(
             'MessageData',
             json_encode($Data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '[]',
-            DEBUG_FORMAT_TEXT
+            self::DEBUG_TEXT
         );
     }
 }
