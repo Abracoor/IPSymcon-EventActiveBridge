@@ -6,12 +6,14 @@ class EventActiveBridge extends IPSModuleStrict
 {
     private const DEBUG_TEXT = 0;
     private const EVENT_CHANGE_ACTIVE = 10804;
+    private const VARIABLE_UPDATE = 10603;
 
     public function Create(): void
     {
         parent::Create();
 
         $this->RegisterPropertyInteger('EventID', 0);
+        $this->RegisterPropertyInteger('CommandVariableID', 0);
         $this->RegisterVariableBoolean('EventActive', 'Wochenplan aktiv', [], 10);
     }
 
@@ -19,8 +21,8 @@ class EventActiveBridge extends IPSModuleStrict
     {
         parent::ApplyChanges();
 
-        // Remove previous message registrations so a changed EventID
-        // does not leave stale listeners behind.
+        // Remove previous message registrations so changed object IDs
+        // do not leave stale listeners behind.
         foreach ($this->GetMessageList() as $senderID => $messages) {
             foreach ($messages as $message) {
                 $this->UnregisterMessage($senderID, $message);
@@ -28,6 +30,7 @@ class EventActiveBridge extends IPSModuleStrict
         }
 
         $eventID = $this->ReadPropertyInteger('EventID');
+        $commandVariableID = $this->ReadPropertyInteger('CommandVariableID');
 
         if ($eventID <= 0) {
             $this->SendDebug('Configuration', 'No EventID configured.', self::DEBUG_TEXT);
@@ -49,12 +52,39 @@ class EventActiveBridge extends IPSModuleStrict
         $this->SetValue('EventActive', $active);
 
         $this->RegisterMessage($eventID, self::EVENT_CHANGE_ACTIVE);
+
+        if ($commandVariableID > 0) {
+            if (!IPS_VariableExists($commandVariableID)) {
+                $this->SendDebug(
+                    'Configuration',
+                    sprintf('Configured CommandVariableID %d does not exist.', $commandVariableID),
+                    self::DEBUG_TEXT
+                );
+                return;
+            }
+
+            $variable = IPS_GetVariable($commandVariableID);
+            if ($variable['VariableType'] !== VARIABLETYPE_BOOLEAN) {
+                $this->SendDebug(
+                    'Configuration',
+                    sprintf('CommandVariableID %d is not Boolean.', $commandVariableID),
+                    self::DEBUG_TEXT
+                );
+                return;
+            }
+
+            $this->RegisterMessage($commandVariableID, self::VARIABLE_UPDATE);
+        }
+
         $this->SendDebug(
             'Configuration',
             sprintf(
-                'Listening for EM_CHANGEACTIVE on EventID %d. Initial EventActive=%s',
+                'Listening for EventID %d (EventActive=%s)%s',
                 $eventID,
-                $active ? 'true' : 'false'
+                $active ? 'true' : 'false',
+                $commandVariableID > 0
+                    ? sprintf(' and Boolean CommandVariableID %d.', $commandVariableID)
+                    : '.'
             ),
             self::DEBUG_TEXT
         );
@@ -62,38 +92,60 @@ class EventActiveBridge extends IPSModuleStrict
 
     public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
     {
-        if ($Message !== self::EVENT_CHANGE_ACTIVE) {
-            return;
-        }
+        $eventID = $this->ReadPropertyInteger('EventID');
+        $commandVariableID = $this->ReadPropertyInteger('CommandVariableID');
 
-        if (!IPS_EventExists($SenderID)) {
+        if ($Message === self::EVENT_CHANGE_ACTIVE && $SenderID === $eventID) {
+            if (!IPS_EventExists($SenderID)) {
+                $this->SendDebug(
+                    'EventActive',
+                    sprintf('Sender EventID %d no longer exists.', $SenderID),
+                    self::DEBUG_TEXT
+                );
+                return;
+            }
+
+            $event = IPS_GetEvent($SenderID);
+            $active = (bool) $event['EventActive'];
+
+            $this->SetValue('EventActive', $active);
+
             $this->SendDebug(
                 'EventActive',
-                sprintf('Sender EventID %d no longer exists.', $SenderID),
+                sprintf(
+                    'EventID %d changed: EventActive=%s',
+                    $SenderID,
+                    $active ? 'true' : 'false'
+                ),
                 self::DEBUG_TEXT
             );
             return;
         }
 
-        $event = IPS_GetEvent($SenderID);
-        $active = (bool) $event['EventActive'];
+        if ($Message === self::VARIABLE_UPDATE && $SenderID === $commandVariableID) {
+            if (!IPS_VariableExists($SenderID) || !IPS_EventExists($eventID)) {
+                return;
+            }
 
-        $this->SetValue('EventActive', $active);
+            $requestedState = GetValueBoolean($SenderID);
+            $event = IPS_GetEvent($eventID);
+            $currentState = (bool) $event['EventActive'];
 
-        $this->SendDebug(
-            'EventActive',
-            sprintf(
-                'EventID %d changed: EventActive=%s',
-                $SenderID,
-                $active ? 'true' : 'false'
-            ),
-            self::DEBUG_TEXT
-        );
+            $this->SendDebug(
+                'Command',
+                sprintf(
+                    'CommandVariableID %d requested EventActive=%s (current=%s)',
+                    $SenderID,
+                    $requestedState ? 'true' : 'false',
+                    $currentState ? 'true' : 'false'
+                ),
+                self::DEBUG_TEXT
+            );
 
-        $this->SendDebug(
-            'MessageData',
-            json_encode($Data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '[]',
-            self::DEBUG_TEXT
-        );
+            // Avoid unnecessary writes and possible feedback loops.
+            if ($requestedState !== $currentState) {
+                IPS_SetEventActive($eventID, $requestedState);
+            }
+        }
     }
 }
