@@ -1,0 +1,10 @@
+{
+    "$schema": "https://www.symcon.de/assets/files/validation/formSchema.json",
+    "elements": [
+        {
+            "type": "SelectEvent",
+            "name": "EventID",
+            "caption": "Zu überwachendes Ereignis"
+        }
+    ]
+}
