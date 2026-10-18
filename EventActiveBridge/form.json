@@ -10,6 +10,11 @@
             "type": "SelectVariable",
             "name": "SourceVariableID",
             "caption": "Steuervariable (Boolean)"
+        },
+        {
+            "type": "SelectInstance",
+            "name": "StatusInstanceID",
+            "caption": "KNX-Statusinstanz"
         }
     ]
 }
