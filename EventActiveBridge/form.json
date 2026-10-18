@@ -5,6 +5,11 @@
             "type": "SelectEvent",
             "name": "EventID",
             "caption": "Zu überwachendes Ereignis"
+        },
+        {
+            "type": "SelectVariable",
+            "name": "SourceVariableID",
+            "caption": "Steuervariable (Boolean)"
         }
     ]
 }
