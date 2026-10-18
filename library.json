@@ -1,0 +1,13 @@
+{
+    "$schema": "https://www.symcon.de/assets/files/validation/librarySchema.json",
+    "id": "{F4B8A1D6-2E9C-4A73-B5D1-8C7E3F9A6204}",
+    "author": "Abracoor",
+    "name": "IPSymcon EventActiveBridge",
+    "url": "https://github.com/Abracoor/IPSymcon-EventActiveBridge",
+    "compatibility": {
+        "version": "9.0"
+    },
+    "version": "0.1",
+    "build": 0,
+    "date": 0
+}
