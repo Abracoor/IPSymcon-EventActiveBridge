@@ -15,6 +15,8 @@ class EventActiveBridge extends IPSModuleStrict
 
         $this->RegisterPropertyInteger('EventID', 0);
         $this->RegisterPropertyInteger('SourceVariableID', 0);
+        $this->RegisterPropertyInteger('StatusInstanceID', 0);
+
         $this->RegisterVariableBoolean('EventActive', 'Wochenplan aktiv', [], 10);
     }
 
@@ -90,6 +92,9 @@ class EventActiveBridge extends IPSModuleStrict
             ),
             self::DEBUG_TEXT
         );
+
+        // Publish the actual state after configuration/restart so KNX starts synchronized.
+        $this->SendStatusToKNX($active, 'InitialSync');
     }
 
     public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
@@ -141,6 +146,9 @@ class EventActiveBridge extends IPSModuleStrict
             json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '[]',
             self::DEBUG_TEXT
         );
+
+        // Always publish the actual event state, never just mirror an incoming command.
+        $this->SendStatusToKNX($active, 'EventActiveChange');
     }
 
     private function HandleSourceVariableUpdate(int $senderID, array $data): void
@@ -172,6 +180,25 @@ class EventActiveBridge extends IPSModuleStrict
         }
 
         $requestedActive = GetValueBoolean($senderID);
+        $event = IPS_GetEvent($eventID);
+        $actualActive = (bool) $event['EventActive'];
+
+        // A KNX status telegram sent by this module can also update the KNX Value variable.
+        // Do not write the event again when the requested state already is the actual state.
+        if ($requestedActive === $actualActive) {
+            $this->SendDebug(
+                'SourceVariable',
+                sprintf(
+                    'VariableID %d updated, but EventID %d already has EventActive=%s. No action required.',
+                    $senderID,
+                    $eventID,
+                    $actualActive ? 'true' : 'false'
+                ),
+                self::DEBUG_TEXT
+            );
+            return;
+        }
+
         IPS_SetEventActive($eventID, $requestedActive);
 
         $this->SendDebug(
@@ -188,6 +215,43 @@ class EventActiveBridge extends IPSModuleStrict
         $this->SendDebug(
             'SourceMessageData',
             json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '[]',
+            self::DEBUG_TEXT
+        );
+    }
+
+    private function SendStatusToKNX(bool $active, string $context): void
+    {
+        $statusInstanceID = $this->ReadPropertyInteger('StatusInstanceID');
+
+        if ($statusInstanceID <= 0) {
+            $this->SendDebug(
+                'KNXStatus',
+                sprintf('%s: No StatusInstanceID configured.', $context),
+                self::DEBUG_TEXT
+            );
+            return;
+        }
+
+        if (!IPS_InstanceExists($statusInstanceID)) {
+            $this->SendDebug(
+                'KNXStatus',
+                sprintf('%s: Configured StatusInstanceID %d does not exist.', $context, $statusInstanceID),
+                self::DEBUG_TEXT
+            );
+            return;
+        }
+
+        $result = EIB_Switch($statusInstanceID, $active);
+
+        $this->SendDebug(
+            'KNXStatus',
+            sprintf(
+                '%s: EIB_Switch on InstanceID %d with Status=%s returned %s.',
+                $context,
+                $statusInstanceID,
+                $active ? 'true' : 'false',
+                $result ? 'true' : 'false'
+            ),
             self::DEBUG_TEXT
         );
     }
