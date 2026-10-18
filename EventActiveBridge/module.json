@@ -1,0 +1,13 @@
+{
+    "$schema": "https://www.symcon.de/assets/files/validation/moduleSchema.json",
+    "id": "{D5E7270D-9036-440D-A6E1-4AD22FBCBF6C}",
+    "name": "EventActiveBridge",
+    "type": 3,
+    "vendor": "",
+    "aliases": [],
+    "url": "https://github.com/Abracoor/IPSymcon-EventActiveBridge",
+    "parentRequirements": [],
+    "childRequirements": [],
+    "implemented": [],
+    "prefix": "EAB"
+}
